@@ -45,3 +45,7 @@ def update_emotion_summary_all(prob_dict):
 
     conn.commit()
     conn.close()
+
+def day_summarize():
+    conn = pymysql.connect(**MYSQL_CONFIG)
+    today = datetime.now().date()

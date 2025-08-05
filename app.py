@@ -6,6 +6,7 @@ import joblib
 from SQL_function import save_to_db, update_emotion_summary_all
 from model import predict_emotion
 import pymysql
+from datetime import datetime, date
 # ✅ Flask 앱 초기화
 app = Flask(__name__)
 
@@ -21,7 +22,9 @@ connection = pymysql.connect(
 
 
 
-# ✅ API 엔드포인트
+# ----------------------------------------------------------
+# 발화에 따른 감정 누적
+# ----------------------------------------------------------
 @app.route("/predict", methods=["POST"])
 def predict():
     data = request.get_json()
@@ -52,8 +55,9 @@ def predict():
         "message": "감정 분석 완료 및 저장됨",
         "result": result
     })
-# API 엔드포인트
-
+# ----------------------------------------------------------
+# 이벤트 저장 / 반환
+# ----------------------------------------------------------
 @app.route('/save_event', methods=['POST'])
 def save_event():
     data = request.get_json()
@@ -114,6 +118,100 @@ def get_events(chat_id):
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
+# ----------------------------------------------------------
+# 누적 감정 일별 / 월별 / 주별 제공
+# ----------------------------------------------------------       
+
+@app.route('/summary/daily/<date>', methods=['GET'])
+def summary_daily(date):
+    try:
+        with connection.cursor() as cursor:
+            query = """
+                SELECT 
+                    emotion,
+                    ROUND(total_confidence / count, 2) AS avg_percent
+                FROM emotion_summary
+                WHERE date = %s
+            """
+            cursor.execute(query, (date,))
+            rows = cursor.fetchall()
+
+        if not rows:
+            return jsonify({'success': False, 'message': f'{date}의 데이터가 없습니다.'}), 404
+
+        return jsonify({'success': True, 'date': date, 'data': rows}), 200
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/summary/monthly/<month>', methods=['GET'])
+def summary_monthly(month):
+    try:
+        with connection.cursor() as cursor:
+            query = """
+                SELECT 
+                    emotion,
+                    ROUND(SUM(total_confidence) / SUM(count), 2) AS avg_percent
+                FROM emotion_summary
+                WHERE DATE_FORMAT(date, '%%Y-%%m') = %s
+                GROUP BY emotion
+            """
+            cursor.execute(query, (month,))
+            rows = cursor.fetchall()
+
+        if not rows:
+            return jsonify({'success': False, 'message': f'{month}의 데이터가 없습니다.'}), 404
+
+        return jsonify({'success': True, 'month': month, 'data': rows}), 200
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/summary/weekly/<start_date>/<end_date>', methods=['GET'])
+def summary_weekly(start_date, end_date):
+    if not start_date or not end_date:
+        return jsonify({'success': False, 'message': '시작일과 종료일이 모두 필요합니다.'}), 400
+
+    try:
+        with connection.cursor() as cursor:
+            query = """
+                SELECT 
+                    date,
+                    emotion,
+                    ROUND(total_confidence / count, 2) AS avg_percent
+                FROM emotion_summary
+                WHERE date BETWEEN %s AND %s
+                ORDER BY date, emotion
+            """
+            cursor.execute(query, (start_date, end_date))
+            rows = cursor.fetchall()
+
+        if not rows:
+            return jsonify({
+                'success': False,
+                'message': f'{start_date}부터 {end_date}까지의 데이터가 없습니다.'
+            }), 404
+
+        # ✅ 날짜 포맷 변환
+        for row in rows:
+            if isinstance(row['date'], (datetime, date)):
+                row['date'] = row['date'].strftime('%Y-%m-%d')
+
+        return jsonify({
+            'success': True,
+            'range': {
+                'start_date': start_date,
+                'end_date': end_date
+            },
+            'data': rows
+        }), 200
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+    
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
