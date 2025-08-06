@@ -1,0 +1,6 @@
+flask
+pymysql
+joblib
+torch
+transformers
+huggingface-hub
