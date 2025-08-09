@@ -3,14 +3,24 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
 import joblib
-from SQL_function import save_to_db, update_emotion_summary_all,get_user_dashboard,complete_mission
+from SQL_function import save_to_db, update_emotion_summary_all, save_full_log,get_user_dashboard,complete_mission
 from model import predict_emotion
 import pymysql
 from datetime import datetime, date
 # ✅ Flask 앱 초기화
 app = Flask(__name__)
 
-        # ✅ MySQL 연결
+# ✅ MySQL 연결
+def get_connection():
+    return pymysql.connect(
+        host="127.0.0.1",
+        user='root',
+        password='0000',
+        database='emotion_db',
+        charset='utf8mb4',
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
 connection = pymysql.connect(
             host="127.0.0.1",
             user='root',
@@ -28,25 +38,42 @@ connection = pymysql.connect(
 @app.route("/predict", methods=["POST"])
 def predict():
     data = request.get_json()
-    sentence = data.get("text")
+    user_text = data.get("user_text")
+    gpt_text = data.get("gpt_text")
+    chat_id = data.get("chat_id")
+    today = datetime.now().date()
 
-    if not sentence:
-        return jsonify({"error": "No sentence provided"}), 400
+    if not all([user_text, gpt_text, chat_id]):
+        return jsonify({"error": "chat_id, user_text, gpt_text 모두 필요합니다."}), 400
 
-    result = predict_emotion(sentence)  # ➜ {'불안': 12.4, '기쁨': 31.2, ...}
+
+    
+    # 단어 거르기
+    NEUTRAL_KEYWORDS = {"고마워", "감사", "안녕", "ㅋㅋ", "ㅎㅎ", "웅", "응", "헉", "헐", "오", "와"}
+    if any(word in user_text for word in NEUTRAL_KEYWORDS):
+        save_full_log(chat_id, user_text, gpt_text,today)
+        return jsonify({
+            "message": "저장하지 않았습니다.",
+            "result": {}
+        })
+
+
+    result = predict_emotion(user_text)  # ➜ {'불안': 12.4, '기쁨': 31.2, ...}
     top_emotion = max(result, key=result.get)
     confidence = result[top_emotion]
 
     # ✅ 중립 50% 이상 필터링
     if "중립" in result and result["중립"] >= 50.0:
-        save_to_db(sentence, top_emotion, confidence)
+        save_to_db(user_text, top_emotion, confidence)
+        save_full_log(chat_id, user_text, gpt_text,today)
         return jsonify({
             "message": "중립 감정이 50% 이상이라 저장하지 않았습니다.",
             "result": result
         })
 
     # ✅ 문장 저장 (top 감정 기준)
-    save_to_db(sentence, top_emotion, confidence)
+    save_to_db(user_text, top_emotion, confidence)
+    save_full_log(chat_id, user_text, gpt_text,today)
 
     # ✅ 전체 감정 누적 저장
     update_emotion_summary_all(result)
@@ -62,7 +89,7 @@ def predict():
 def save_event():
     data = request.get_json()
 
-    chat_id = data.get('chat_id')
+    chat_id = int(data.get('chat_id'))
     event_text = data.get('event_text')
     event_type = data.get('event_type')
 
@@ -209,7 +236,82 @@ def summary_weekly(start_date, end_date):
 
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
+# ----------------------------------------------------------
+# 대화 내역 불러오기
+# ----------------------------------------------------------     
+@app.route("/get_conversations/<chat_id>", methods=["GET"])
+def get_conversations(chat_id):
+    try:
+        connection = get_connection()
+        with connection.cursor() as cursor:
+            query = """
+                SELECT date, user_text, gpt_text
+                FROM conversation_log
+                WHERE chat_id = %s
+                ORDER BY date ASC, id ASC
+            """
+            cursor.execute(query, (chat_id,))
+            rows = cursor.fetchall()
+        connection.close()
 
+        conversations = []
+        for row in rows:
+            conversations.append({
+                "role": "user",
+                "content": row["user_text"]
+            })
+            conversations.append({
+                "role": "gpt",
+                "content": row["gpt_text"]
+            })
+
+        return jsonify({
+            "success": True,
+            "conversations": conversations
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+# ----------------------------------------------------------
+# 최신 chat_id 가지고오기.
+# ----------------------------------------------------------  
+@app.route("/latest_chat_id", methods=["GET"])
+def get_latest_chat_id():
+    try:
+        connection = get_connection()
+
+        with connection.cursor() as cursor:
+            query = """
+                SELECT chat_id
+                FROM events
+                ORDER BY id DESC
+                LIMIT 1
+            """
+            cursor.execute(query)
+            row = cursor.fetchone()
+        connection.close()
+
+        if row:
+            return jsonify({
+                "success": True,
+                "latest_chat_id": row["chat_id"]
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "message": "이벤트 데이터가 없습니다."
+            }), 404
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+=======
 # ----------------------------------------------------------
 # 대시보드
 # ----------------------------------------------------------
@@ -253,7 +355,6 @@ def mission_complete(user_id, mission_id):
         "character": updated_char
     }), 200
 
-    
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
