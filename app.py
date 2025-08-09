@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
 import joblib
-from SQL_function import save_to_db, update_emotion_summary_all, save_full_log
+from SQL_function import save_to_db, update_emotion_summary_all, save_full_log,get_user_dashboard,complete_mission
 from model import predict_emotion
 import pymysql
 from datetime import datetime, date
@@ -243,7 +243,6 @@ def summary_weekly(start_date, end_date):
 def get_conversations(chat_id):
     try:
         connection = get_connection()
-
         with connection.cursor() as cursor:
             query = """
                 SELECT date, user_text, gpt_text
@@ -312,6 +311,49 @@ def get_latest_chat_id():
             "success": False,
             "message": str(e)
         }), 500
+=======
+# ----------------------------------------------------------
+# 대시보드
+# ----------------------------------------------------------
+@app.route("/api/users/<int:user_id>/dashboard", methods=["GET"])
+def dashboard(user_id):
+    """
+    대시보드 조회:
+      - character: {user_id, total_exp, level, next_exp_req}
+      - todayMission: {mission_id, title, is_completed}
+    """
+    character, today_mission = get_user_dashboard(user_id)
+    return jsonify({
+        "character": character,
+        "todayMission": today_mission
+    }), 200
+
+# ----------------------------------------------------------
+# 미션 완료
+# ----------------------------------------------------------
+@app.route("/api/users/<int:user_id>/missions/<int:mission_id>/complete", methods=["POST"])
+def mission_complete(user_id, mission_id):
+    """
+    미션 완료 처리:
+      - 이미 완료된 경우 409 에러
+      - 완료 시 경험치 +1, 레벨업 감지 후 character 정보 반환
+    """
+    ok, updated_char = complete_mission(user_id, mission_id)
+    if not ok:
+        return jsonify({
+            "error": "MissionAlreadyCompleted",
+            "message": "이미 완료한 미션입니다!"
+        }), 409
+
+    return jsonify({
+        "missionStatus": {
+            "user_id": user_id,
+            "mission_id": mission_id,
+            "mission_date": date.today().isoformat(),
+            "is_completed": True
+        },
+        "character": updated_char
+    }), 200
 
 
 if __name__ == "__main__":
