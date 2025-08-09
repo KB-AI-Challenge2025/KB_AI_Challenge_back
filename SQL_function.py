@@ -10,6 +10,16 @@ MYSQL_CONFIG = {
     "charset": "utf8mb4"
 }
 
+def save_full_log(chat_id, user_text, gpt_text, date):
+    connection = pymysql.connect(**MYSQL_CONFIG)
+    with connection.cursor() as cursor:
+        query = """
+            INSERT INTO conversation_log (chat_id, date, user_text, gpt_text)
+            VALUES (%s, %s, %s, %s)
+        """
+        cursor.execute(query, (chat_id, date, user_text, gpt_text))
+        connection.commit()
+
 def save_to_db(sentence, emotion, confidence):
     conn = pymysql.connect(**MYSQL_CONFIG)
     with conn.cursor() as cursor:
