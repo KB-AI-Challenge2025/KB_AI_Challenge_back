@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
 import joblib
-from SQL_function import save_to_db, update_emotion_summary_all, save_full_log
+from SQL_function import save_to_db, update_emotion_summary_all, save_full_log,get_user_dashboard,complete_mission
 from model import predict_emotion
 import pymysql
 from datetime import datetime, date
@@ -241,7 +241,6 @@ def summary_weekly(start_date, end_date):
 def get_conversations(chat_id):
     try:
         connection = get_connection()
-
         with connection.cursor() as cursor:
             query = """
                 SELECT date, user_text, gpt_text
@@ -310,7 +309,6 @@ def get_latest_chat_id():
             "success": False,
             "message": str(e)
         }), 500
-    
 
 # ----------------------------------------------------------
 # rag
