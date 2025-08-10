@@ -309,6 +309,21 @@ def get_latest_chat_id():
             "success": False,
             "message": str(e)
         }), 500
+# ----------------------------------------------------------
+# 대시보드
+# ----------------------------------------------------------
+@app.route("/api/users/<int:user_id>/dashboard", methods=["GET"])
+def dashboard(user_id):
+    """
+    대시보드 조회:
+      - character: {user_id, total_exp, level, next_exp_req}
+      - todayMission: {mission_id, title, is_completed}
+    """
+    character, today_mission = get_user_dashboard(user_id)
+    return jsonify({
+        "character": character,
+        "todayMission": today_mission
+    }), 200
 
 # ----------------------------------------------------------
 # rag
